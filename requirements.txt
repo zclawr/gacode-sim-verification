@@ -1,0 +1,13 @@
+numpy
+torch
+matplotlib
+seaborn
+hydra-core
+h5py
+argparse
+pathlib
+textwrap
+tempfile
+
+# Install from local moduel (fork with TGLF saturation fixes)
+./pyrokinetics

@@ -1,0 +1,6 @@
+[submodule "gacode-source"]
+	path = gacode-source
+	url = https://github.com/gafusion/gacode.git
+[submodule "pyrokinetics"]
+	path = pyrokinetics
+	url = git@github.com:zclawr/pyrokinetics.git

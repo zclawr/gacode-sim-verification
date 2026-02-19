@@ -1,0 +1,2 @@
+echo "Downloading reference data to the current directory"
+aws s3 cp --endpoint-url=https://s3-west.nrp-nautilus.io s3://ai-fusion-ga/tglf_sumf_data_major_minor_perturb_madcut_filter/train/tglfnn_DB_sat2_em_azf-1_RLNS_12_+1_azf-1__perturbed_processed.h5 .
