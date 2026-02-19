@@ -28,4 +28,5 @@ For a fresh CGYRO and TGLF compilation, use:
 ```
 python setup_gacode.py
 ```
+WARNING: This setup script was lifted from another project I'm working on, but I haven't verified it for TGLF. I'll get around to this later today, but in case this fails, simply compile TGLF as per usual, using the `OPEN_MPI` platform.
 
