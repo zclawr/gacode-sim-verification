@@ -285,7 +285,7 @@ if __name__ == "__main__":
     # SHOULD NOT CHANGE UNLESS FILE STRUCTURE CHANGED DURING SETUP
     OUTPUT_PARSING_SCRIPT_PATH = "./gacode-docker/output_parsing/batch_tglf_processor.py"
     # CAN CHANGE
-    gacode_root = '/home/zach/local_gacode_abs/gacode-source'
+    gacode_root = '/home/zach/local_gacode_abs/gacode'
     input_path = './reference_inputs.npy'
     flux_path = './reference_fluxes.npy'
     num_tests = int(args.num_samples)

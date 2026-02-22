@@ -2,7 +2,7 @@
 """
 CGYRO + TGLF Environment Setup Script
 
-This script automatically sets up CGYRO, TGLF as a git submodule in gacode-source
+This script automatically sets up CGYRO, TGLF as a git submodule in gacode
 and compiles the required binaries (provided by GACODE).
 
 Prerequisites:
@@ -79,8 +79,8 @@ def setup_gacode_submodule():
     """Initialize existing CGYRO git submodule"""
     print("\n=== Initializing CGYRO git submodule ===")
 
-    repo_root = Path(__file__).parent.parent
-    gacode_dir = repo_root / "gacode-source"
+    repo_root = Path(__file__).parent
+    gacode_dir = repo_root / "gacode"
 
     # Initialize and update the existing submodule
     try:
@@ -145,7 +145,6 @@ def compile_binaries(gacode_dir):
         # os.chmod(binary_dst, 0o755)
 
         print(f"✅ Binary compiled and saved")
-        return True
 
     except subprocess.CalledProcessError as e:
         print(f"❌ Failed to compile CGYRO binary: {e}")
@@ -159,11 +158,11 @@ def compile_binaries(gacode_dir):
         # os.chmod(binary_dst, 0o755)
 
         print(f"✅ Binary compiled and saved")
-        return True
 
     except subprocess.CalledProcessError as e:
         print(f"❌ Failed to compile TGLF binary: {e}")
         return False
+    return True
 
 def main():
     """Main setup function"""
@@ -175,11 +174,11 @@ def main():
         print("\n❌ Missing dependencies. Please install them and run again.")
         sys.exit(1)
 
-    repo_root = Path(__file__).parent.parent
+    repo_root = Path(__file__).parent
     gacode_dir = repo_root / "gacode"
 
     # Setup CGYRO submodule
-    # gacode_dir = setup_gacode_submodule()
+    gacode_dir = setup_gacode_submodule()
 
     # Compile binaries
     successfully_compiled = compile_binaries(gacode_dir)
