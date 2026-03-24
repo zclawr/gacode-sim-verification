@@ -64,7 +64,10 @@ def h5_to_torch(file_path):
             # assert flux_spectrum.shape[2] == 2 or flux_spectrum.shape[2] == 1, f"Unexpected shape at dim=2: {flux_spectrum.shape}"
 
             # Option 1: Select the first index at dim=2 (assuming it’s always the useful one)
-            flux_spectrum = flux_spectrum[:, :, 0, :, :, :]  # (size, nky, nf, ns, 5)
+
+            # FIX: sum over modes, instead of taking mode 0
+            # Current size: (size, nky, nmode, ns, nf, 5)
+            flux_spectrum = np.sum(flux_spectrum[:, :, :, :, :, :], axis=2)  # (size, nky, ns, nf, 5)
             # 5 - channels ()
             # ns - num species (elec, ions)
             # nf - num fields? (should be 3 for cgyro, 1 for TGLF?) 
@@ -73,7 +76,7 @@ def h5_to_torch(file_path):
             # assert np.allclose(flux_spectrum[:, :, 0], flux_spectrum[:, :, 1]), "Dim=2 entries differ"
 
             # Sum over nf
-            summed_flux_spectrum = np.sum(flux_spectrum, axis=2)  # (size, nky, ns, 5)
+            summed_flux_spectrum = np.sum(flux_spectrum, axis=3)  # (size, nky, ns, 5)
 
             intermediate_target_list.append(summed_flux_spectrum)
 
@@ -90,12 +93,15 @@ def h5_to_torch(file_path):
 
     # the sumf_tensor is of shape (size, nky, ns, 5)
     # now start converting to the interested fluxes: Ge,Qe,Qi,Pi, per wavenumber
+    print(flux_per_spicies_per_ky.shape)
     G_elec_per_ky = flux_per_spicies_per_ky[:, :, 0, 0]  # (size,nky,)
     Q_elec_per_ky = flux_per_spicies_per_ky[:, :, 0, 1]  # (size,nky,)
-    Q_ions_per_ky = torch.sum(flux_per_spicies_per_ky[:, :, 1:, 1], dim=-1)  # (size,nky,)
-    P_ions_per_ky = torch.sum(flux_per_spicies_per_ky[:, :, 1:, 2], dim=-1)  # (size,nky,)
+    Q_ion1_per_ky = flux_per_spicies_per_ky[:, :, 1, 1]  # (size,nky,)
+    Q_ion2_per_ky = flux_per_spicies_per_ky[:, :, 2, 1]  # (size,nky,)
+    P_ion1_per_ky = flux_per_spicies_per_ky[:, :, 1, 2]  # (size,nky,)
+    P_ion2_per_ky = flux_per_spicies_per_ky[:, :, 2, 2] # (size,nky,)
     # cat them to be (size, nky, 4)
-    target_flux_per_ky = torch.stack((G_elec_per_ky, Q_elec_per_ky, Q_ions_per_ky, P_ions_per_ky), dim=-1) # (size, nky, 4)
+    target_flux_per_ky = torch.stack((G_elec_per_ky, Q_elec_per_ky, Q_ion1_per_ky, Q_ion2_per_ky, P_ion1_per_ky, P_ion2_per_ky), dim=-1) # (size, nky, 4)
 
     return combined_matrix, target_flux_per_ky
 

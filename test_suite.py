@@ -68,9 +68,9 @@ def run_tglf(gacode_root, test_dir):
     subprocess.run(["chmod", "+x", "./run_simulation.sh"], env=my_env)
     subprocess.run(["bash", "run_simulation.sh", "tglf", f"{test_dir}"], env=my_env)
 
-def parse_tglf_outputs(test_dir, out_h5, input_npy, fluxes_npy):
+def parse_tglf_outputs(test_dir, out_h5, out_gt_fluxes, input_npy, fluxes_npy):
     # subprocess.run(["python", OUTPUT_PARSING_SCRIPT_PATH, test_dir, "-o", out_h5])
-    process_all_batches(test_dir, out_h5)
+    process_all_batches(test_dir, out_h5, out_gt_fluxes)
     h5_to_npy(out_h5, input_npy, fluxes_npy)
 
 def compute_ky_mae(gt_inputs, inputs, fig_path):
@@ -87,59 +87,59 @@ def compute_ky_mae(gt_inputs, inputs, fig_path):
     plt.savefig(fig_path + f'ky_percent.png')
     plt.close('all')
 
-def diagonal_plot_summed_fluxes(gt_input_path, gt_fluxes_path, sim_input_path, sim_flux_path, fig_path):
+def diagonal_plot(name_x_gt, name_y, gt_input_path, gt_fluxes_path, sim_input_path, sim_flux_path, fig_path, sum_fluxes=False, filter_vexb=False):
     gt_inputs = np.load(gt_input_path, allow_pickle=True)
     gt_fluxes = np.load(gt_fluxes_path, allow_pickle=True)
     inputs = np.load(sim_input_path, allow_pickle=True)
     fluxes = np.load(sim_flux_path, allow_pickle=True)
+
+    # Swap axes if this is the case
+    if gt_fluxes.shape[2] == 24:
+        gt_fluxes = np.transpose(gt_fluxes, (0, 2, 1))
+
+    if fluxes.shape[2] == 24:
+        fluxes = np.transpose(fluxes, (0, 2, 1))
+
+    if sum_fluxes:
+        gt_fluxes = np.sum(gt_fluxes, axis=1)
+        fluxes = np.sum(fluxes, axis=1)
+    else:
+        gt_fluxes = np.reshape(gt_fluxes, (gt_fluxes.shape[0] * gt_fluxes.shape[1], gt_fluxes.shape[2]))
+        fluxes = np.reshape(fluxes, (fluxes.shape[0] * fluxes.shape[1], fluxes.shape[2]))
     
-    gt_fluxes = np.sum(gt_fluxes, axis=1)
-    fluxes = np.sum(fluxes, axis=1)
+    if filter_vexb:
+        vexb_shear_gt = gt_inputs[:,0,23] # Can take any index of axis 1, as this is ky, and VEXB_SHEAR is at index 23
+        vexb_shear = inputs[:,0,23]
 
-    print(gt_fluxes.shape) 
+        VEXB_SHEAR_THRESHOLD = 0.04 # As per Tom's suggestion
+        vexb_small_idxs = np.array(np.where((np.abs(vexb_shear_gt) <= VEXB_SHEAR_THRESHOLD) & (np.abs(vexb_shear) <= VEXB_SHEAR_THRESHOLD))).squeeze()
 
-    labels = ["OUT_G_E", "OUT_Q_E", "OUT_Q_I", "OUT_P_I"]
+        print(f'Filtered out {gt_fluxes.shape[0] - vexb_small_idxs.shape[0]} entries that had |VEXB_SHEAR| > {VEXB_SHEAR_THRESHOLD}')
+        
+        gt_fluxes = gt_fluxes[vexb_small_idxs, :]
+        fluxes = fluxes[vexb_small_idxs, :]
 
+    if gt_fluxes.shape[1] == 6:
+        labels = ["OUT_G_E", "OUT_Q_E", "OUT_Q_I_1", "OUT_Q_I_2", "OUT_P_I_1", "OUT_P_I_2"]
+    elif gt_fluxes.shape[1] == 4:
+        labels = ["OUT_G_E", "OUT_Q_E", "OUT_Q_I", "OUT_P_I"]
+        if fluxes.shape[1] == 6:
+            fluxes = np.stack([fluxes[:,0], fluxes[:,1], fluxes[:,2] + fluxes[:,3], fluxes[:,4] + fluxes[:,5]], axis=-1)
     for i in range(len(labels)):
-        plt.scatter(np.log10(gt_fluxes[:,i]), np.log10(fluxes[:,i]), alpha=0.4)
-        plt.axline((0, 0), slope=1, color='red', linestyle='--')
-        plt.xlabel(f"SiNN {labels[i]} Flux (Log)")
-        plt.ylabel(f"Simulated {labels[i]} Flux (Log)")
-        plt.savefig(fig_path + f'/diagonal_{labels[i]}_summed_fluxes.png')
-        plt.show()
-        plt.close('all')
-
-def diagonal_plot(gt_input_path, gt_fluxes_path, sim_input_path, sim_flux_path, fig_path):
-    gt_inputs = np.load(gt_input_path, allow_pickle=True)
-    gt_fluxes = np.load(gt_fluxes_path, allow_pickle=True)
-    inputs = np.load(sim_input_path, allow_pickle=True)
-    fluxes = np.load(sim_flux_path, allow_pickle=True)
-    
-    gt_fluxes = np.reshape(gt_fluxes, (gt_fluxes.shape[0] * gt_fluxes.shape[1], gt_fluxes.shape[2]))
-    fluxes = np.reshape(fluxes, (fluxes.shape[0] * fluxes.shape[1], fluxes.shape[2]))
-
-    print(gt_fluxes.shape) 
-
-    labels = ["OUT_G_E", "OUT_Q_E", "OUT_Q_I", "OUT_P_I"]
-
-    for i in range(len(labels)):
-        # plt.scatter(np.log10(gt_fluxes[:,i]), np.log10(fluxes[:,i]), alpha=0.4)
-        # plt.axline((0, 0), slope=1, color='red', linestyle='--')
-        # plt.xlabel(f"SiNN {labels[i]} Flux (Log)")
-        # plt.ylabel(f"Simulated {labels[i]} Flux (Log)")
-        # plt.savefig(fig_path + f'/diagonal_{labels[i]}.png')
-        # plt.show()
-        # plt.close('all')
         plt.figure(figsize=(6, 4))
-        sns.kdeplot(x=np.log10(gt_fluxes[:,i]), y=np.log10(fluxes[:,i]), fill=True, cmap="crest")
-        plt.axline((0, 0), slope=1, color='red', linestyle='--')
-        plt.title(f'Density Plot of Re-Simulated and TGLF-SiNN {labels[i]} Fluxes')
-        plt.xlabel('Ground Truth Flux (TGLF-SiNN)')
-        plt.ylabel('Re-Simulated Flux')
-        plt.savefig(fig_path + f'/diagonal_{labels[i]}.png')
+        # sns.kdeplot(x=np.log10(gt_fluxes[:,i]), y=np.log10(fluxes[:,i]), fill=True, cmap="crest", levels=16, bw_adjust=0.8, gridsize=400)
+        # plt.scatter(x=np.log10(gt_fluxes[:,i]), y=np.log10(fluxes[:,i]), alpha=0.05)
+        # plt.imshow(a, cmap='hot', interpolation='nearest')
+        plt.hist2d(x=np.log10(gt_fluxes[:,i]), y=np.log10(fluxes[:,i]), bins=64, range=[[-10, 2],[-10, 2]], cmap='plasma_r', cmin=1)
+        plt.axline((0, 0), slope=1, color='black', linestyle='--', alpha=0.3)
+        plt.title(f'Density Plot of {name_x_gt} and {name_y} {labels[i]} Fluxes')
+        plt.xlabel(f'{name_x_gt} Flux')
+        plt.ylabel(f'{name_y} Flux')
+        plt.colorbar(label='Bin Counts')
+        plt.savefig(fig_path + f'/{name_x_gt}_{name_y}_diagonal_{labels[i]}.png', dpi=300, bbox_inches='tight')
+        plt.legend()
         plt.show()
         plt.close('all')
-        # seaborn.kdeplot(np.log10(gt_fluxes[:,i]), np.log10(fluxes[:,i]))
 
 def compare_fluxes(gt_input_path, gt_fluxes_path, sim_input_path, sim_flux_path, fig_path):
     gt_inputs = np.load(gt_input_path, allow_pickle=True)
@@ -147,7 +147,23 @@ def compare_fluxes(gt_input_path, gt_fluxes_path, sim_input_path, sim_flux_path,
     inputs = np.load(sim_input_path, allow_pickle=True)
     fluxes = np.load(sim_flux_path, allow_pickle=True)
 
-    compute_ky_mae(gt_inputs, inputs, fig_path)
+    # Swap axes if this is the case
+    if gt_fluxes.shape[2] == 24:
+        gt_fluxes = np.transpose(gt_fluxes, (0, 2, 1))
+
+    if fluxes.shape[2] == 24:
+        fluxes = np.transpose(fluxes, (0, 2, 1))
+
+    if gt_fluxes.shape[2] == 6:
+        gt_fluxes = np.stack([gt_fluxes[:,:,0], gt_fluxes[:,:,1], gt_fluxes[:,:,2] + gt_fluxes[:,:,3], gt_fluxes[:,:,4] + gt_fluxes[:,:,5]], axis=2)
+
+    if fluxes.shape[2] == 6:
+        fluxes = np.stack([fluxes[:,:,0], fluxes[:,:,1], fluxes[:,:,2] + fluxes[:,:,3], fluxes[:,:,4] + fluxes[:,:,5]], axis=2)
+    
+    print(gt_fluxes.shape)
+    print(fluxes.shape)
+
+    # compute_ky_mae(gt_inputs, inputs, fig_path)
     print(f'Number of per-ky fluxes computed: {gt_fluxes.shape[0] * gt_fluxes.shape[1]}')
     print('=' * 50)
     # Compute Raw MAE
@@ -280,6 +296,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--num_samples", "-n")
     parser.add_argument("--output_dir", "-o")
+    parser.add_argument("--run_fluxes", "-r", default=False)
     args = parser.parse_args()
 
     # SHOULD NOT CHANGE UNLESS FILE STRUCTURE CHANGED DURING SETUP
@@ -293,16 +310,22 @@ if __name__ == "__main__":
     os.makedirs(test_dir_root, exist_ok=True)
     test_dir_sim = os.path.join(test_dir_root, 'tglf_simready')
     test_sim_h5 = os.path.join(test_dir_root, 'results.h5')
+    test_gt_fluxes_npy = os.path.join(test_dir_root, 'sim_gt_fluxes.npy')
     test_inputs_npy = os.path.join(test_dir_root, 'inputs.npy')
     test_fluxes_npy = os.path.join(test_dir_root, 'fluxes.npy')
     sampled_input_path = os.path.join(test_dir_root, f'ref_inputs_sampled_{num_tests}.npy')
     sampled_flux_path = os.path.join(test_dir_root, f'ref_fluxes_sampled_{num_tests}.npy')
     fig_path = os.path.join(test_dir_root, 'mae_') # NOTE: this is not a complete path, it is completed in the compare_fluxes function call
     diag_fig_path = test_dir_root
+
     # RUN TEST SUITE
-    setup_tglf_tests(num_tests, input_path, flux_path, test_dir_sim, sampled_input_path, sampled_flux_path)
-    run_tglf(gacode_root, test_dir_sim)
-    parse_tglf_outputs(test_dir_sim, test_sim_h5, test_inputs_npy, test_fluxes_npy)
-    compare_fluxes(sampled_input_path, sampled_flux_path, test_inputs_npy, test_fluxes_npy, fig_path)
-    diagonal_plot(sampled_input_path, sampled_flux_path, test_inputs_npy, test_fluxes_npy, diag_fig_path)
-    diagonal_plot_summed_fluxes(sampled_input_path, sampled_flux_path, test_inputs_npy, test_fluxes_npy, diag_fig_path)
+    if args.run_fluxes:
+        setup_tglf_tests(num_tests, input_path, flux_path, test_dir_sim, sampled_input_path, sampled_flux_path)
+        run_tglf(gacode_root, test_dir_sim)
+    
+    # parse_tglf_outputs(test_dir_sim, test_sim_h5, test_gt_fluxes_npy, test_inputs_npy, test_fluxes_npy)
+    # compare_fluxes(sampled_input_path, test_gt_fluxes_npy, test_inputs_npy, test_fluxes_npy, fig_path)
+    diagonal_plot('SiNN', 'Saturated', sampled_input_path, sampled_flux_path, test_inputs_npy, test_fluxes_npy, diag_fig_path, sum_fluxes=False, filter_vexb=False)
+    diagonal_plot('Simulated', 'Saturated', test_inputs_npy, test_gt_fluxes_npy, test_inputs_npy, test_fluxes_npy, diag_fig_path, sum_fluxes=False, filter_vexb=False)
+    diagonal_plot('SiNN', 'Simulated', sampled_input_path, sampled_flux_path, test_inputs_npy, test_gt_fluxes_npy, diag_fig_path, sum_fluxes=False, filter_vexb=False)
+    # diagonal_plot_summed_fluxes(sampled_input_path, sampled_flux_path, test_inputs_npy, test_fluxes_npy, diag_fig_path)
