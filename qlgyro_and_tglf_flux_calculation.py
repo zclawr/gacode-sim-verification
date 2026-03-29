@@ -1174,3 +1174,149 @@ def calculate_TGLF_flux(in0, tglf_kys, tglf_gammas, tglf_ql, sat_rule_in, alpha_
     # )
     # heat_flux_spectrum = np.sum(heat_flux_spectrum, axis=1)
     return tglf_sat
+
+def calculate_QLGYRO_flux(in0, cgyro_kys, cgyro_gammas, cgyro_ql, sat_rule_in, alpha_zf_in):
+    # Calculate the QL flux from SAT1 using the quasilinear weights
+    # derived from CGYRO. This will give the same heat flux as TGLF if the QL
+    # weights are the same, and will show the effect of the differences in QL weights
+
+    # gammas = asarray(tglf['eigenvalue_spectrum']['gamma']).T
+    # CGYRO inputs
+    # cgyro_kys = cgyro_freq.sel(dim="ky").data
+    # growth = cgyro_freq.sel(dim="gamma").data
+    # tglf_growth_rates = tglf_growth.sel(dim="gamma").data
+    # cgyro_gammas = np.array([growth, growth * 0]).T
+    # tglf_gammas = np.array([tglf_growth_rates,tglf_growth_rates*0])
+
+    # data = OMFIT["scratch"]["linear_tglf_cgyro"]
+    # index = np.where(OMFIT["scratch"][dbname]["id"] == runid)[0][0]
+    # print("index", index)
+    # print("fn", OMFIT["scratch"][dbname]["fn"][index], "sat:", sat_rule_in, "azf: ", alpha_zf_in)
+    # for key, value in data.items():
+    #     if isinstance(value, np.ndarray) or isinstance(value, xr.DataArray):
+    #         if value.ndim == 1 and not key.endswith("profile"):
+    #             in0[key] = value[index]
+    in0["ALPHA_E"] = 1
+    in0["RLNP_CUTOFF"] = 18
+    in0["ALPHA_QUENCH"] = 0
+    in0["ALPHA_ZF"] = alpha_zf_in
+    in0["TAUS_1"] = 1
+    in0["AS_1"] = 1
+    in0["SAT_RULE"] = sat_rule_in
+    if sat_rule_in == 1:
+        in0["UNITS"] = "GYRO"
+    else:
+        in0["UNITS"] = "CGYRO"
+    # gammas = np.array([growth, growth * 0])
+
+    rho_ion = 0.0
+    charge = 0.0
+
+    if not bool(in0["USE_AVE_ION_GRID"]):
+        rho_ion = (in0["MASS_2"] * in0["TAUS_2"]) ** 0.5 / in0["ZS_2"]
+    else:
+        for is_ in range(1, in0["NS"] + 1):  # Assuming N is the upper limit of the loop
+            if is_ > 1 and (in0["ZS_%s" % is_] * in0["AS_%s" % is_]) / abs(in0["AS_1"] * in0["ZS_1"]) > 0.1:
+                charge += in0["ZS_%s" % is_] * in0["AS_%s" % is_]
+                rho_ion += (
+                    in0["ZS_%s" % is_]
+                    * in0["AS_%s" % is_]
+                    * (in0["MASS_%s" % is_] * in0["TAUS_%s" % is_]) ** 0.5
+                    / in0["ZS_%s" % is_]
+                )
+        rho_ion /= charge
+
+    in0["rho_ion"] = rho_ion
+    in0["SAT_geo0_out"] = 1
+    kx0_e, satgeo1, satgeo2, R_unit, bt0, bgeo0, gradr0, _, _, _, _ = get_sat_params(
+        sat_rule_in, cgyro_kys, np.transpose(cgyro_gammas), **in0
+    )
+
+    in0["SAT_geo1_out"] = satgeo1
+    in0["SAT_geo2_out"] = satgeo2
+    in0["B_geo0_out"] = bgeo0
+    in0["Bt0_out"] = bt0
+    in0["grad_r0_out"] = gradr0
+
+    # Add empty mode dimension to bring QL data into TGLF format:
+    # QL_data = cgyro_ql.expand_dims({"mode": 2}, axis=[1]).copy()
+    # # Set subdominant mode to zero
+    # QL_data.loc[dict(mode=1)].data.fill(0)
+    # # Need to reorder ions from D, C, e- to e-, D, C:
+    # QL_data = QL_data.roll(species=1, roll_coords=True)
+
+    print(cgyro_ql.shape)
+    x = 1/0
+    cgyro_particle_QL = cgyro_ql[:, :, :, :, 0]
+    cgyro_energy_QL = cgyro_ql[:, :, :, :, 1]
+    cgyro_stresstor_QL = cgyro_ql[:, :, :, :, 2]
+    # parallel_stress_QL = tglf_ql[:, :, :, :, 3]
+    # exchange_QL = tglf_ql[:, :, :, :, 4]
+
+    # cgyro_particle_QL = QL_data.sel(moment="particle")
+    # cgyro_energy_QL = QL_data.sel(moment="energy")
+    # cgyro_stresstor_QL = QL_data.sel(moment="momentum")
+
+    # sign of BT_EXP affects sign of gB normalization in CGYRO for QL weights
+    sign_Bt = in0["BT_EXP"] / abs(in0["BT_EXP"])
+    cgyro_particle_QL *= sign_Bt
+    cgyro_energy_QL *= sign_Bt
+    cgyro_stresstor_QL *= sign_Bt
+
+    QL_data = np.stack(
+        [
+            cgyro_particle_QL,
+            cgyro_energy_QL,
+            cgyro_stresstor_QL,
+            np.zeros(np.shape(cgyro_stresstor_QL)),
+            np.zeros(np.shape(cgyro_stresstor_QL)),
+        ],
+        axis=4,
+    )
+    # Intensity Spectrum
+    if sat_rule_in == 1:
+        delta = 0
+        intensity_cgyro, QLA_P, QLA_E, QLA_O = np.array(
+            intensity_sat(1, cgyro_kys, cgyro_gammas, kx0_e, 1, QL_data, **in0)
+        ).T
+    if sat_rule_in == 2:
+        delta = 0
+        intensity_cgyro, QLA_P, QLA_E, QLA_O = np.array(
+            intensity_sat(2, cgyro_kys, cgyro_gammas, kx0_e, 1, QL_data, **in0)
+        ).T
+    if sat_rule_in == 3:
+        delta = 0
+        intensity_cgyro, QLA_P, QLA_E, QLA_O = np.array(
+            intensity_sat(3, cgyro_kys, cgyro_gammas, kx0_e, 1, QL_data, **in0)
+        ).T
+
+    cgyro_sat = sum_ky_spectrum(
+        sat_rule_in,  #
+        cgyro_kys,  #
+        cgyro_gammas,  #
+        np.zeros(np.shape(cgyro_kys)),  # avep0 - only needed for SAT0
+        R_unit,  #
+        kx0_e,  # spectral shift
+        np.zeros(np.shape(cgyro_gammas)),  # potential  = intensity
+        cgyro_particle_QL,
+        cgyro_energy_QL,
+        cgyro_stresstor_QL,
+        np.zeros(np.shape(cgyro_stresstor_QL)),
+        np.zeros(np.shape(cgyro_stresstor_QL)),
+        **in0,
+    )
+    # cgyro_sat['energy_flux_integral'] dimensions are: nmodes, ns, nfield
+    cgyro_satG = np.sum(np.sum(cgyro_sat["particle_flux_integral"], axis=2), axis=0)
+    cgyro_satQ = np.sum(np.sum(cgyro_sat["energy_flux_integral"], axis=2), axis=0)
+    cgyro_satP = np.sum(np.sum(cgyro_sat["toroidal_stresses_integral"], axis=2), axis=0)
+    # new:
+    cgyro_sum_flux_spectrum = np.sum(cgyro_sat["sum_flux_spectrum"], axis=1)  # sum over modes
+
+    # Heat flux spectrum, by multiplying QL*SAT1, reshape intensity to (21,3)
+    heat_flux_spectrum = np.sum(np.sum(cgyro_energy_QL, axis=1), axis=1) * np.repeat(
+        intensity_cgyro[:, 0][:, np.newaxis], 3, axis=1
+    )
+    heat_flux_spectrum = np.sum(heat_flux_spectrum, axis=1)
+    # print('cgyro_satG',cgyro_satG)
+    # new:
+    return (cgyro_satG, cgyro_satQ, cgyro_satP, heat_flux_spectrum, cgyro_sum_flux_spectrum)
