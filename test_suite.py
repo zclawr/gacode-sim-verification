@@ -10,7 +10,7 @@ from format_tglf import process_tglf_batches
 from h5_to_cgyro_input import convert_h5_to_batch_dir_parallel
 from generate_ky_spectra import save_h5, compute_ky_matrix_skip_bad
 from h5_to_npy import h5_to_npy
-from parse_fluxes import process_all_batches
+from parse_fluxes import process_all_batches_tglf
 
 def create_test_inputs(physical_conditions, h5_path, tglf_dest_dir, reformat_dir):
     os.makedirs(tglf_dest_dir, exist_ok=True)
@@ -69,8 +69,7 @@ def run_tglf(gacode_root, test_dir):
     subprocess.run(["bash", "run_simulation.sh", "tglf", f"{test_dir}"], env=my_env)
 
 def parse_tglf_outputs(test_dir, out_h5, out_gt_fluxes, input_npy, fluxes_npy):
-    # subprocess.run(["python", OUTPUT_PARSING_SCRIPT_PATH, test_dir, "-o", out_h5])
-    process_all_batches(test_dir, out_h5, out_gt_fluxes)
+    process_all_batches_tglf(test_dir, out_h5, out_gt_fluxes)
     h5_to_npy(out_h5, input_npy, fluxes_npy)
 
 def compute_ky_mae(gt_inputs, inputs, fig_path):

@@ -4,52 +4,14 @@ Refactored TGLF Saturation Rules using real PyroScan data.
 This script reads simulation results from a directory rather than mocking them.
 """
 import os
-from pathlib import Path
 import re
-from pyrokinetics import Pyro
-from pyrokinetics.diagnostics.saturation_rules import SaturationRules
 import numpy as np
 import h5py
 import os
-from xarray import DataArray
 from qlgyro_and_tglf_flux_calculation import calculate_TGLF_flux
-from omfit_classes.omfit_tglf import OMFITtglf, get_ky_spectrum
+from omfit_classes.omfit_tglf import OMFITtglf
 
-def load_pyro(input_dir):
-   """
-   Loads simulation data from a directory.
-   PyroScan.from_directory identifies the code (CGYRO, GS2, etc.) and
-   aggregates the linear data into a single object.
-   """
-   path = Path(input_dir)
-   input_file = os.path.join(input_dir, 'input.tglf')
-   if not path.exists():
-       raise FileNotFoundError(f"Directory {input_dir} not found.")
-
-   print(f"Loading simulations from {input_dir}...")
-
-   pyro = Pyro(gk_file=input_file)
-   pyro.load_gk_output(load_ql_fluxes=True)
-   pyro.base_pyro = pyro
-
-   data = pyro.gk_output
-   ky_values = data['ky'].values
-
-   print(f"Loaded Pyro with {len(ky_values)} ky points: {ky_values}")
-
-   inputs = pyro.gk_input.data
-   meta = {}
-
-   # Populate metadata for applying saturation
-   meta['vexb_shear'] = inputs['vexb_shear']
-   meta['alpha_e'] = inputs['alpha_e']
-   meta['alpha_zf'] = inputs['alpha_zf']
-   meta['alpha_quench'] = inputs['alpha_quench']
-   meta['use_ave_ion_grid'] = inputs['use_ave_ion_grid']
-
-   return pyro, ky_values, meta
-
-def apply_tglf_saturation_omfit(omfit_tglf, sat_rule, alpha_zf_in=-1):
+def apply_tglf_saturation(omfit_tglf, sat_rule, alpha_zf_in=-1):
    """
    Apply TGLF saturation rules based on OMFIT objects and implementations
    """
@@ -70,36 +32,14 @@ def apply_tglf_saturation_omfit(omfit_tglf, sat_rule, alpha_zf_in=-1):
    sumf = tglf_sat['sum_flux_spectrum']
    return sumf, tglf_kys
 
-def apply_tglf_saturation(pyro, sat_rule, meta):
-   """
-   Apply TGLF saturation rules to the real PyroScan data.
-   """
-   saturation = SaturationRules(pyro)
-  
-   print(f"\nApplying TGLF SAT{sat_rule}...")
-
-   # This uses the pyro_scan.gk_output (growth rates and QL fluxes)
-   result = saturation.tglf_saturation(
-       sat_rule=sat_rule,
-       output_convention="pyrokinetics",
-       units="CGYRO", # Should be CGYRO for SAT2
-       alpha_zf = meta['alpha_zf'], # should be -1 for alpha_zf TGLF-SiNN
-       vexb_shear = meta['vexb_shear'],
-       use_ave_ion_grid = meta['use_ave_ion_grid'],
-       alpha_e = meta['alpha_e'],
-       alpha_quench = meta['alpha_quench'],
-       tglf_inputs = pyro.gk_input.data
-   )
-   return result
-
-def parse_tglf_dir_omfit(dir, sat_rule):
+def parse_tglf_dir(dir, sat_rule):
     # Ensure the directory exists
     if not os.path.isdir(dir):
         raise FileNotFoundError(f"TGLF output directory not found: {dir}")
     
     tglf = OMFITtglf(dir)
     # Both {sumf, ql_gt} have shape: (ky, mode, species, field, type)
-    sumf, kys = apply_tglf_saturation_omfit(tglf, sat_rule)
+    sumf, kys = apply_tglf_saturation(tglf, sat_rule)
     
     # Parse ground truth fluxes from out.tglf.sum_flux_spectrum
     particle_flux = np.asarray(tglf['sum_flux_spectrum']['particle'].astype(np.float32)).transpose((2, 0, 1))
@@ -110,94 +50,24 @@ def parse_tglf_dir_omfit(dir, sat_rule):
 
     sumf_gt = np.stack([particle_flux, energy_flux, toroidal_stress_flux, parallel_stress_flux, exchange_flux], axis=-1)
 
+    # The following are summed over fields and modes
     G_elec_summed = np.sum(np.sum(np.sum(sumf[:,:,0,:,0], axis=-1), axis=-1), axis=-1)
     Q_elec_summed = np.sum(np.sum(np.sum(sumf[:,:,0,:,1], axis=-1), axis=-1), axis=-1)
     Q_ions_summed = np.sum(np.sum(np.sum(np.sum(sumf[:,:,1:,:,1], axis=-1), axis=-1), axis=-1), axis=-1)
     P_ions_summed = np.sum(np.sum(np.sum(np.sum(sumf[:,:,1:,:,2], axis=-1), axis=-1), axis=-1), axis=-1)
 
-    G_elec_gt_per_ky = np.sum(sumf_gt[:,0,:,0], axis=-1) # Only needs to be summed over fields (out.tglf.sum_flux_spectrum already sums over modes)
+    # The following only need to be summed over fields (out.tglf.sum_flux_spectrum already sums over modes)
+    G_elec_gt_per_ky = np.sum(sumf_gt[:,0,:,0], axis=-1)
     Q_elec_gt_per_ky = np.sum(sumf_gt[:,0,:,1], axis=-1)
     Q_ion1_gt_per_ky = np.sum(sumf_gt[:,1,:,1], axis=-1)
     Q_ion2_gt_per_ky = np.sum(sumf_gt[:,2,:,1], axis=-1)
     P_ion1_gt_per_ky = np.sum(sumf_gt[:,1,:,2], axis=-1)
     P_ion2_gt_per_ky = np.sum(sumf_gt[:,2,:,2], axis=-1)
 
-    Q_ion1_summed = np.sum(np.sum(np.sum(sumf[:,:,1,:,1], axis=-1), axis=-1), axis=-1)
-    Q_ion2_summed = np.sum(np.sum(np.sum(sumf[:,:,2,:,1], axis=-1), axis=-1), axis=-1)
-    Q_ion1_gt_summed = np.sum(np.sum(sumf_gt[:,1,:,1], axis=-1), axis=-1)
-    Q_ion2_gt_summed = np.sum(np.sum(sumf_gt[:,2,:,1], axis=-1), axis=-1)
-    print(dir + '=' * 50)
-    print(f'Q_ion1 (SAT2) = {Q_ion1_summed}')
-    print(f'Q_ion2 (SAT2) = {Q_ion2_summed}')
-    # print(f'Q_ions (SAT2) = {Q_ions_summed}')
-    print(f'Q_ion1 (out.tglf.sum_flux_spectrum) = {Q_ion1_gt_summed}')
-    print(f'Q_ion2 (out.tglf.sum_flux_spectrum) = {Q_ion2_gt_summed}')
-    # print(f'Q_ions (out.tglf.sum_flux_spectrum) = {np.sum(Q_ions_gt_per_ky)}')
-    print()
-
     fluxes = np.array([G_elec_summed, Q_elec_summed , Q_ions_summed, P_ions_summed], dtype=np.float32)
     file_fluxes = np.array([G_elec_gt_per_ky, Q_elec_gt_per_ky, Q_ion1_gt_per_ky, Q_ion2_gt_per_ky, P_ion1_gt_per_ky, P_ion2_gt_per_ky], dtype=np.float32)
     ky_array = kys.astype(np.float32)
     tglf_inputs = tglf['input.tglf']
-    return fluxes, sumf, ky_array, tglf_inputs, file_fluxes
-
-def parse_tglf_dir(dir, sat_rule):
-    pyro, kys, meta = load_pyro(dir)
-    sat_results, tglf_sat, tglf_inputs = apply_tglf_saturation(pyro, sat_rule, meta)
-
-    data = pyro.gk_output.data
-
-    # Ordered to (field, species, ky, mode)
-    G_elec_gt = data['ql_particle'].to_numpy()[:,0,:,0]
-    Q_elec_gt = data['ql_heat'].to_numpy()[:,0,:,0]
-    Q_ions_gt = data['ql_heat'].to_numpy()[:,1:,:,0]
-    P_ions_gt = data['ql_momentum'].to_numpy()[:,1:,:,0]
-    # Sum over fields
-    G_elec_gt = np.sum(G_elec_gt, axis=0)
-    Q_elec_gt = np.sum(Q_elec_gt, axis=0)
-    Q_ions_gt = np.sum(Q_ions_gt, axis=0)
-    P_ions_gt = np.sum(P_ions_gt, axis=0)
-    # Sum over ion species
-    Q_ions_gt = np.sum(Q_ions_gt, axis=0)
-    P_ions_gt = np.sum(P_ions_gt, axis=0)
-
-    # swap ns and nf around (nky, nmodes, ns, nf, 5) -> (nky, nmodes, nf, ns, 5)
-    sumf = np.transpose(tglf_sat['sum_flux_spectrum'].astype(np.float32), (0, 1, 3, 2, 4))
-    # Take first (and only, by default) mode
-    sumf_nf = sumf[:,0,:,:,:] # (nky, nf, ns, 5)
-    # Sum over nf
-    sumf_nf = np.sum(sumf_nf, axis=1)  # (nky, ns, 5)
-
-    G_elec = sumf_nf[:, 0, 0]
-    Q_elec = sumf_nf[:, 0, 1]
-    # Sum over ion species
-    Q_ions = np.sum(sumf_nf[:, 1:, 1], axis=1)
-    P_ions = np.sum(sumf_nf[:, 1:, 2], axis=1)
-                    
-    # Compute errors for storage
-    G_elec_se = (G_elec - G_elec_gt) ** 2
-    Q_elec_se = (Q_elec - Q_elec_gt) ** 2
-    Q_ions_se = (Q_ions - Q_ions_gt) ** 2
-    P_ions_se = (P_ions - P_ions_gt) ** 2
-
-    # Sum over kys
-    G_elec = np.sum(G_elec, axis=0)
-    Q_elec = np.sum(Q_elec, axis=0)
-    Q_ions = np.sum(Q_ions, axis=0)
-    P_ions = np.sum(P_ions, axis=0)
-
-    # For saturation fluxes, [mode=0, species, field=0]
-    # G_elec = float(sat_results['particle'][0].values)
-    # Q_elec = float(sat_results['heat'][0].values)
-    # Q_ions = float(np.sum(sat_results['heat'][1:].values))
-    # P_ions = float(np.sum(sat_results['momentum'][1:].values))
-
-    fluxes = np.array([G_elec, Q_elec, Q_ions, P_ions], dtype=np.float32)
-    flux_errors = np.array([G_elec_se, Q_elec_se, Q_ions_se, P_ions_se], dtype=np.float32)
-    file_fluxes = np.array([G_elec_gt, Q_elec_gt, Q_ions_gt, P_ions_gt])
-
-    ky_array = kys.astype(np.float32)
-
     return fluxes, sumf, ky_array, tglf_inputs, file_fluxes
 
 def find_batch_directories(root_dir):
@@ -241,7 +111,7 @@ def prepare_input_dict(in0):
   
    return input_dict
 
-def process_all_batches(root_dir, output_h5, output_gt_fluxes, sat_rule=2, start_batch=None, end_batch=None):
+def process_all_batches_tglf(root_dir, output_h5, output_gt_fluxes, sat_rule=2, start_batch=None, end_batch=None):
    """
    Process all batch directories and save to a single HDF5 file.
   
@@ -285,7 +155,7 @@ def process_all_batches(root_dir, output_h5, output_gt_fluxes, sat_rule=2, start
    fail_count = 0
    gt_fluxes = []
    for batch_num, batch_path in batches:
-       result = parse_tglf_dir_omfit(batch_path, sat_rule)
+       result = parse_tglf_dir(batch_path, sat_rule)
        if result is not None:
            fluxes, sumf, ky, in0, file_fluxes = result
            gt_fluxes.append(file_fluxes)
@@ -393,5 +263,5 @@ def append_to_h5_individual_keys(h5_path, input_dict, fluxes, sumf, ky, meta=Non
 # === Run (parallel) ===
 if __name__ == "__main__":
     # process_all_batches("./test3/tglf_simready", "./pyro_parsing.h5")
-    parse_tglf_dir_omfit("./results/pyrofix_commitfix_100_parsefix/tglf_simready/batch-000", 2)
+    parse_tglf_dir("./results/pyrofix_commitfix_100_parsefix/tglf_simready/batch-000", 2)
     # parse_tglf_dir("./results/pyrofix_commitfix_100_parsefix/tglf_simready/batch-000", 2)
